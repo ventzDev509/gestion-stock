@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: stockpilot
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: BOOTSTRAP_SUPERADMIN_EMAIL
+        value: ventzdev@gmail.com
+      - key: BOOTSTRAP_SUPERADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: ALERT_EMAIL_TO
+        value: ventzdev@gmail.com
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_TEMPLATE_NAME
+        sync: false
+      - key: WHATSAPP_LANGUAGE
+        value: fr
+      - key: ALERT_WHATSAPP_TO
+        value: '50946123390'

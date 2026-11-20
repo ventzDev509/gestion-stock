@@ -1,0 +1,15 @@
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
+import type { AdminProfile } from '../types'
+
+const SESSION_KEY='stockpilot-server-user'
+export function AuthGate({children}:{children:(auth:{user:AdminProfile;logout:()=>void;replaceUser:(user:AdminProfile)=>void})=>ReactNode}){
+ const [user,setUser]=useState<AdminProfile|null>(null),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('')
+ useEffect(()=>{void(async()=>{try{const r=await fetch('/api/auth/me',{credentials:'same-origin'});if(r.ok){const d=await r.json() as {user:AdminProfile};setUser(d.user);sessionStorage.setItem(SESSION_KEY,JSON.stringify(d.user));return}sessionStorage.removeItem(SESSION_KEY)}catch{if(!navigator.onLine){const cached=sessionStorage.getItem(SESSION_KEY);if(cached){try{setUser(JSON.parse(cached) as AdminProfile)}catch{sessionStorage.removeItem(SESSION_KEY)}}}}finally{setReady(true)}})()},[])
+ const login=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError('');const f=new FormData(e.currentTarget);try{const r=await fetch('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:String(f.get('email')).trim(),password:String(f.get('password'))})});const d=await r.json() as {user?:AdminProfile;error?:string};if(!r.ok||!d.user){setError(d.error||'Connexion impossible.');return}setUser(d.user);sessionStorage.setItem(SESSION_KEY,JSON.stringify(d.user))}catch{setError('Connexion impossible. Vérifiez votre connexion internet.')}finally{setBusy(false)}}
+ const logout=()=>{void fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}).catch(()=>{});sessionStorage.removeItem(SESSION_KEY);setUser(null)}
+ const replaceUser=(next:AdminProfile)=>{setUser(next);sessionStorage.setItem(SESSION_KEY,JSON.stringify(next))}
+ if(!ready)return <div className="auth-loading"><div className="brand-mark"><ShieldCheck size={22}/></div><span>Vérification de la connexion…</span></div>
+ if(!user)return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><div className="brand-mark"><ShieldCheck size={23}/></div><div><b>StockPilot</b><small>Gestion des accès</small></div></div><div className="auth-title"><h1>Connexion administrateur</h1><p>Connectez-vous pour accéder à la base de stock partagée.</p></div><form className="auth-form" onSubmit={e=>void login(e)}><label className="field">Adresse courriel<input className="text-input" name="email" type="email" required autoComplete="username"/></label><label className="field">Mot de passe<input className="text-input" name="password" type="password" required autoComplete="current-password"/></label>{error&&<div className="auth-error">{error}</div>}<button className="btn primary auth-submit" disabled={busy}><KeyRound size={16}/>{busy?'Vérification…':'Se connecter'}</button></form><div className="auth-foot"><LockKeyhole size={14}/>Connexion sécurisée par le serveur.</div></div></div>
+ return <>{children({user,logout,replaceUser})}</>
+}
