@@ -25,11 +25,12 @@ export async function initializeDatabase(){
   CREATE TABLE IF NOT EXISTS products(id TEXT PRIMARY KEY,code TEXT NOT NULL UNIQUE,category TEXT NOT NULL REFERENCES categories(name),data JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
   CREATE TABLE IF NOT EXISTS movements(id TEXT PRIMARY KEY,reference TEXT NOT NULL UNIQUE,date TEXT NOT NULL,product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,type TEXT NOT NULL CHECK(type IN ('ENTREE','SORTIE')),quantity NUMERIC NOT NULL CHECK(quantity>0),unit_price NUMERIC NOT NULL,note TEXT NOT NULL DEFAULT '');
   CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value JSONB NOT NULL);
+  CREATE TABLE IF NOT EXISTS activity_log(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,actor_name TEXT NOT NULL,actor_email TEXT NOT NULL,action TEXT NOT NULL,details TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
   CREATE SEQUENCE IF NOT EXISTS stock_movement_reference START 1;
   INSERT INTO settings(key,value) VALUES('currency','"HTG"'::jsonb) ON CONFLICT(key) DO NOTHING;
   INSERT INTO settings(key,value) VALUES('catalog_initialized','false'::jsonb) ON CONFLICT(key) DO NOTHING;
  `)
- console.log('PostgreSQL tables and sequence are ready (admins, sessions, categories, products, movements, settings).')
+ console.log('PostgreSQL tables and sequence are ready (admins, sessions, categories, products, movements, settings, activity_log).')
  for(const name of defaultCategories)await pool.query('INSERT INTO categories(name) VALUES($1) ON CONFLICT DO NOTHING',[name])
  await pool.query('DELETE FROM sessions WHERE expires_at < NOW()')
  const email=String(process.env.BOOTSTRAP_SUPERADMIN_EMAIL||'ventzdev@gmail.com').trim().toLowerCase()
@@ -46,14 +47,47 @@ const dbRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next)
 function publicMovement(row){return{id:row.id,reference:row.reference,date:row.date,productId:row.product_id,type:row.type,quantity:Number(row.quantity),unitPrice:Number(row.unit_price),note:row.note}}
 function validProduct(p){return p&&typeof p.id==='string'&&typeof p.name==='string'&&p.name.trim().length>0&&typeof p.code==='string'&&typeof p.category==='string'&&typeof p.unit==='string'&&Number.isFinite(Number(p.initialStock))&&Number(p.initialStock)>=0&&Number.isFinite(Number(p.minAlertThreshold))&&Number(p.minAlertThreshold)>=0&&Number.isFinite(Number(p.purchasePrice))&&Number.isFinite(Number(p.sellingPrice))}
 
+function describeAction(req){
+ const method=req.method,path=req.path.replace(/\/$/,'')||'/',body=req.body||{},id=decodeURIComponent(path.split('/').at(-1)||'')
+ if(path==='/auth/login')return{action:'Connexion',details:'Connexion réussie'}
+ if(path==='/auth/logout')return{action:'Déconnexion',details:'Session fermée'}
+ if(path==='/auth/password')return{action:'Changement du mot de passe',details:'Mot de passe personnel modifié'}
+ if(path==='/products'&&method==='POST')return{action:'Ajout de produit',details:`${body.name||'Produit'} (${body.code||'sans code'})`}
+ if(path.startsWith('/products/')&&method==='PATCH')return{action:'Modification de produit',details:`${body.name||'Produit'} (${body.code||id})`}
+ if(path.startsWith('/products/')&&method==='DELETE')return{action:'Suppression de produit',details:`Identifiant : ${id}`}
+ if(path==='/categories'&&method==='POST')return{action:'Ajout de catégorie',details:String(body.name||'')}
+ if(path.startsWith('/categories/')&&method==='PATCH')return{action:'Modification de catégorie',details:`${id} → ${body.name||''}`}
+ if(path.startsWith('/categories/')&&method==='DELETE')return{action:'Suppression de catégorie',details:id}
+ if(path==='/movements'&&method==='POST')return{action:body.type==='ENTREE'?'Entrée de stock':'Sortie de stock',details:`${Number(body.quantity)||0} unité(s) · produit ${body.productId||'inconnu'}`}
+ if(path==='/admins'&&method==='POST')return{action:'Création d’administrateur',details:`${body.name||''} · ${body.email||''}`}
+ if(path.startsWith('/admins/')&&method==='PATCH')return{action:'Modification d’administrateur',details:`${body.name||''} · ${body.email||id}`}
+ if(path.startsWith('/admins/')&&method==='DELETE')return{action:'Suppression d’administrateur',details:`Identifiant : ${id}`}
+ if(path==='/settings/currency'&&method==='PUT')return{action:'Changement de devise',details:String(body.currency||'')}
+ if(path==='/backup'&&method==='PUT'){const labels={initialisation:'Initialisation des données de démonstration',restauration:'Restauration de sauvegarde',réinitialisation:'Réinitialisation des données'};return{action:labels[body.operation]||'Remplacement des données',details:`${body.products?.length||0} produit(s), ${body.movements?.length||0} mouvement(s)`}}
+ return{action:`${method} ${path}`,details:'Action effectuée dans le système'}
+}
+function recordSuccessfulActions(req,res,next){
+ const sendJson=res.json.bind(res)
+ res.json=(payload)=>{
+  const writes=['POST','PUT','PATCH','DELETE'].includes(req.method)
+  if(!writes||res.statusCode>=400||!req.user)return sendJson(payload)
+  const entry=describeAction(req)
+  pool.query('INSERT INTO activity_log(id,actor_id,actor_name,actor_email,action,details) VALUES($1,$2,$3,$4,$5,$6)',[randomBytes(16).toString('hex'),req.user.id,req.user.name,req.user.email,entry.action,entry.details]).then(()=>sendJson(payload)).catch(error=>{console.error('Unable to write activity log:',error.message);sendJson(payload)})
+  return res
+ }
+ next()
+}
+
 export function registerDatabaseRoutes(app,{notifyOutOfStock=async()=>{}}={}){
  app.use('/api',requireDatabase,authenticate)
+ app.use('/api',recordSuccessfulActions)
  app.get('/api/auth/status',dbRoute(async(_req,res)=>{const r=await pool.query('SELECT COUNT(*)::int AS count FROM admins');res.json({configured:r.rows[0].count>0})}))
  app.get('/api/auth/me',requireAuth,(req,res)=>res.json({user:req.user}))
- app.post('/api/auth/login',dbRoute(async(req,res)=>{const email=String(req.body?.email||'').trim().toLowerCase(),password=String(req.body?.password||'');const r=await pool.query('SELECT * FROM admins WHERE email=$1',[email]);const user=r.rows[0];if(!user||!await bcrypt.compare(password,user.password_hash))return res.status(401).json({error:'Courriel ou mot de passe incorrect.'});const token=randomBytes(32).toString('base64url'),expires=new Date(Date.now()+sessionHours*60*60*1000);await pool.query('INSERT INTO sessions(token_hash,admin_id,expires_at) VALUES($1,$2,$3)',[secretHash(token),user.id,expires]);cookie(res,token,sessionHours*60*60);res.json({user:profile(user)})}))
+ app.post('/api/auth/login',dbRoute(async(req,res)=>{const email=String(req.body?.email||'').trim().toLowerCase(),password=String(req.body?.password||'');const r=await pool.query('SELECT * FROM admins WHERE email=$1',[email]);const user=r.rows[0];if(!user||!await bcrypt.compare(password,user.password_hash))return res.status(401).json({error:'Courriel ou mot de passe incorrect.'});const token=randomBytes(32).toString('base64url'),expires=new Date(Date.now()+sessionHours*60*60*1000);await pool.query('INSERT INTO sessions(token_hash,admin_id,expires_at) VALUES($1,$2,$3)',[secretHash(token),user.id,expires]);req.user=profile(user);cookie(res,token,sessionHours*60*60);res.json({user:req.user})}))
  app.post('/api/auth/logout',requireAuth,dbRoute(async(req,res)=>{if(req.sessionHash)await pool.query('DELETE FROM sessions WHERE token_hash=$1',[req.sessionHash]);clearCookie(res);res.json({ok:true})}))
  app.patch('/api/auth/password',requireAuth,dbRoute(async(req,res)=>{const r=await pool.query('SELECT * FROM admins WHERE id=$1',[req.user.id]),user=r.rows[0],current=String(req.body?.currentPassword||''),next=String(req.body?.newPassword||'');if(!await bcrypt.compare(current,user.password_hash))return res.status(400).json({error:'Le mot de passe actuel est incorrect.'});if(next.length<10)return res.status(400).json({error:'Le nouveau mot de passe doit contenir au moins 10 caractères.'});const hash=await bcrypt.hash(next,12);await pool.query('UPDATE admins SET password_hash=$1,updated_at=NOW() WHERE id=$2',[hash,user.id]);await pool.query('DELETE FROM sessions WHERE admin_id=$1 AND token_hash<>$2',[user.id,req.sessionHash]);res.json({ok:true})}))
  app.get('/api/admins',requireAuth,requireSuper,dbRoute(async(_req,res)=>{const r=await pool.query('SELECT * FROM admins ORDER BY role DESC,name');res.json(r.rows.map(profile))}))
+ app.get('/api/audit',requireAuth,requireSuper,dbRoute(async(_req,res)=>{const r=await pool.query('SELECT id,actor_id,actor_name,actor_email,action,details,created_at FROM activity_log ORDER BY created_at DESC LIMIT 200');res.json(r.rows.map(x=>({id:x.id,actorId:x.actor_id,actorName:x.actor_name,actorEmail:x.actor_email,action:x.action,details:x.details,createdAt:x.created_at}))) }))
  app.post('/api/admins',requireAuth,requireSuper,dbRoute(async(req,res)=>{const {name,email,password}=req.body||{},perms=Array.isArray(req.body?.permissions)?req.body.permissions.filter(p=>permissions.includes(p)):[];if(typeof name!=='string'||!name.trim()||typeof email!=='string'||!email.includes('@')||typeof password!=='string'||password.length<10)return res.status(400).json({error:'Nom, courriel et mot de passe initial (10 caractères minimum) requis.'});const passwordHash=await bcrypt.hash(password,12),id=randomBytes(16).toString('hex');try{const r=await pool.query("INSERT INTO admins(id,name,email,role,permissions,password_hash) VALUES($1,$2,$3,'ADMIN',$4::jsonb,$5) RETURNING *",[id,name.trim(),email.trim().toLowerCase(),JSON.stringify(perms),passwordHash]);res.status(201).json(profile(r.rows[0]))}catch(e){if(e.code==='23505')return res.status(409).json({error:'Cette adresse courriel est déjà utilisée.'});throw e}}))
  app.patch('/api/admins/:id',requireAuth,requireSuper,dbRoute(async(req,res)=>{const {name,email}=req.body||{},perms=Array.isArray(req.body?.permissions)?req.body.permissions.filter(p=>permissions.includes(p)):[];const r=await pool.query("UPDATE admins SET name=$1,email=$2,permissions=$3::jsonb,updated_at=NOW() WHERE id=$4 AND role='ADMIN' RETURNING *",[String(name||'').trim(),String(email||'').trim().toLowerCase(),JSON.stringify(perms),req.params.id]);if(!r.rowCount)return res.status(404).json({error:'Administrateur introuvable.'});res.json(profile(r.rows[0]))}))
  app.delete('/api/admins/:id',requireAuth,requireSuper,dbRoute(async(req,res)=>{const r=await pool.query("DELETE FROM admins WHERE id=$1 AND role='ADMIN'",[req.params.id]);if(!r.rowCount)return res.status(404).json({error:'Administrateur introuvable.'});res.json({ok:true})}))

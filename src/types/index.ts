@@ -11,3 +11,4 @@ export type Permission = typeof permissions[number]
 export interface AdminUser { id:string; name:string; email:string; role:'SUPER_ADMIN'|'ADMIN'; permissions:Permission[]; passwordHash:string; passwordSalt:string; createdAt:string; updatedAt:string }
 export type AdminProfile = Omit<AdminUser,'passwordHash'|'passwordSalt'>
 export interface PendingMutation { id:string; method:'POST'|'PATCH'|'DELETE'|'PUT'; path:string; body?:unknown; createdAt:string }
+export interface AuditLogEntry { id:string; actorId:string; actorName:string; actorEmail:string; action:string; details:string; createdAt:string }
