@@ -2,7 +2,7 @@ import { Pool } from 'pg'
 import bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'node:crypto'
 
-export const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 30_000 }) : null
+export const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000 }) : null
 const defaultCategories=['Électronique','Accessoires','Bureau','Alimentaire','Nettoyage','Autre']
 const cookieName='stockpilot_session', sessionHours=12
 const profile=row=>({id:row.id,name:row.name,email:row.email,role:row.role,permissions:row.permissions||[],createdAt:row.created_at,updatedAt:row.updated_at})
@@ -29,6 +29,7 @@ export async function initializeDatabase(){
   INSERT INTO settings(key,value) VALUES('currency','"HTG"'::jsonb) ON CONFLICT(key) DO NOTHING;
   INSERT INTO settings(key,value) VALUES('catalog_initialized','false'::jsonb) ON CONFLICT(key) DO NOTHING;
  `)
+ console.log('PostgreSQL tables and sequence are ready (admins, sessions, categories, products, movements, settings).')
  for(const name of defaultCategories)await pool.query('INSERT INTO categories(name) VALUES($1) ON CONFLICT DO NOTHING',[name])
  await pool.query('DELETE FROM sessions WHERE expires_at < NOW()')
  const email=String(process.env.BOOTSTRAP_SUPERADMIN_EMAIL||'ventzdev@gmail.com').trim().toLowerCase()

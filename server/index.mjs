@@ -81,7 +81,16 @@ async function deliverStockout(event){
   return{ok:configured.every(channel=>state[channel]),channels}
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, database: Boolean(pool) }))
+app.get('/api/health', async (_req, res) => {
+  if (!pool) return res.status(503).json({ ok: false, database: false, message: 'DATABASE_URL is not configured.' })
+  try {
+    const result = await pool.query('SELECT current_database() AS name')
+    return res.json({ ok: true, database: true, name: result.rows[0].name })
+  } catch (error) {
+    console.error('Database health check failed:', error.message)
+    return res.status(503).json({ ok: false, database: false, message: 'PostgreSQL connection failed.' })
+  }
+})
 registerDatabaseRoutes(app,{notifyOutOfStock:async event=>{const result=await deliverStockout(event);if(!result.ok)console.error('Échec partiel de notification de rupture',event.eventId,result.channels)}})
 app.post('/api/stockout-alert', async (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, message: 'Connexion requise.' })
@@ -100,5 +109,11 @@ app.post('/api/stockout-alert', async (req, res) => {
 app.use(express.static(dist))
 app.use((_req, res) => res.sendFile(path.join(dist, 'index.html'), error => { if (error) res.status(404).send('Application non construite. Lancez npm run build.') }))
 
-if(pool)await initializeDatabase()
+if (pool) {
+  console.log('DATABASE_URL is set; connecting to PostgreSQL and initializing schema...')
+  await initializeDatabase()
+  console.log('PostgreSQL schema initialization completed.')
+} else {
+  console.error('DATABASE_URL is missing; database-backed API endpoints will return 503.')
+}
 app.listen(port, '0.0.0.0', () => console.log(`StockPilot écoute sur le port ${port}`))
