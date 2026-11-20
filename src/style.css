@@ -25,3 +25,42 @@
 .dark .text-input{background:#303030;border-color:#505050;color:#ececec}.dark .text-input::placeholder{color:#a0a0a0}.dark .text-input:focus{border-color:#8a8a8a;box-shadow:0 0 0 3px #ffffff12}.dark .modal-head h2{color:#f0f0f0}.dark .modal-head p{color:#b4b4b4}.dark .field{color:#d0d0d0}.dark .modal-hint{background:#403923;color:#e6d095}.dark .modal-backdrop{background:#0009}.dark .scrim{background:#0009}
 .dark .bar-track,.dark .gridline{background-color:#494949}.dark .chart-foot,.dark .table-footer{border-color:#424242}.dark .admin-manager .admin-row{background:#2f2f2f}.dark .local-note{background:#303735;color:#c5d4cf}.dark .local-note svg{color:#9dbfb5}.dark .pagination .page-num{background:#424242;color:#fff;border-color:#5a5a5a}
 .dark .auth-screen{background:radial-gradient(circle at 10% 5%,#343434 0,transparent 36%),#212121}.dark .auth-card{background:#2f2f2f;border-color:#424242}.dark .auth-brand b,.dark .auth-title h1{color:#ececec}.dark .auth-brand small,.dark .auth-title p,.dark .auth-foot{color:#b4b4b4}.dark .auth-foot{border-color:#424242}
+
+
+
+:root {
+    color-scheme: light dark;
+}
+
+::-webkit-scrollbar{
+    width: 0;
+    height: 0;
+}
+
+/* Light mode default */
+html,
+body,
+#root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    min-height: 100dvh;
+    background: #ffffff;
+}
+
+
+/* Dark mode otomatik */
+@media (prefers-color-scheme: dark) {
+
+    html,
+    body,
+    #root {
+        background: #09090b;
+    }
+
+}
+
+
+body {
+    overscroll-behavior: none;
+}
