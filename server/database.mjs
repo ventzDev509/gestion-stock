@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'node:crypto'
 
 export const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000 }) : null
-const defaultCategories=['Électronique','Accessoires','Bureau','Alimentaire','Nettoyage','Autre']
+const defaultCategories=[]
 const cookieName='stockpilot_session', sessionHours=12
 const profile=row=>({id:row.id,name:row.name,email:row.email,role:row.role,permissions:row.permissions||[],createdAt:row.created_at,updatedAt:row.updated_at})
 const permissions=['products.view','products.create','products.update','products.delete','movements.view','movements.create','categories.manage','backups.manage']
